@@ -19,7 +19,7 @@ export class SchoolSetupService {
   async getSchoolByTenantId(tenantId: string) {
     return this.prisma.school.findUnique({
       where: { tenantId },
-      include: { branches: true, classes: true },
+      include: { branches: true, classes: true }, // Include related branches and classes
     });
   }
 
