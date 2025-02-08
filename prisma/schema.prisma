@@ -1,0 +1,180 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+model Tenant {
+  id            String    @id @default(uuid())
+  name          String
+  domain        String    @unique
+  subscription  String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  admin         User?     @relation(fields: [adminId], references: [id])
+  adminId       String?
+  users         User[]    @relation("TenantUsers")
+
+  AcademicSettings AcademicSettings[]
+
+  AdmissionForm AdmissionForm[]
+}
+
+model User {
+  id            String    @id @default(uuid())
+  tenantId      String
+  tenant        Tenant     @relation("TenantUsers", fields: [tenantId], references: [id])
+  email         String     
+  name          String
+  role          String     // Example: 'admin', 'user'
+  password      String     // Store the password securely
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  Tenant Tenant[]
+}
+model AcademicSettings {
+  id         String   @id @default(uuid())
+  tenantId   String   @unique
+  settings   Json     // Store settings in JSON format for flexibility
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  Tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+model AdmissionSettings {
+  id                        String    @id @default(cuid())
+  tenantId                  String    @unique
+  editPermissions           Json?     // Existing field
+  widgetPermissions         Json?     // Existing field
+  nameSettings              Json?     // Existing field
+  formFields                Json?     // Existing field
+  feeStructure              Json?     // Existing field
+
+  // New fields for admissions settings
+  admissionNumberPrefix     String?
+  admissionNumberContinueFrom String?
+  customUrl                 String?
+  sendLinkToParent          String?
+  grNumberPrefix            String?
+  grNumberContinueFrom      String?
+  academicYear              String?
+  permittedSessionYear      String?
+  sessionDeadline           DateTime?
+  deadlineMessage           String?
+  childAgeCriteria          Json?     // Array of { grade: string, birthRange: string }
+  documentScreenHeader      String?
+  documentScreenSubheader   String?
+  requiredDocuments         Json?     // Array of strings
+  loginId                   String?
+  transactionKey            String?
+  showPaymentButton         Boolean?
+  admissionFees             Json?     // Object mapping grades to fees
+  displayLogo               Boolean?
+  logoPosition              String?
+  displaySchoolName         Boolean?
+  schoolNamePosition        String?
+  displaySchoolAddress      Boolean?
+  schoolAddressPosition     String?
+  displaySchoolPhone        Boolean?
+  schoolPhonePosition       String?
+  displaySchoolEmail        Boolean?
+  schoolEmailPosition       String?
+  displaySchoolWebsite      Boolean?
+  schoolWebsitePosition     String?
+  footerContent             String?
+  printSchoolHeader         Boolean?
+  providePrintOption        Boolean?
+  printAfterFormFilled      Boolean?
+  printStudentPhoto         Boolean?
+  selectedFields            Json?     // Object mapping fields to booleans
+  formStatuses              Json?     // Array of { name: string, active: boolean, allowEmail: boolean, emailContent: string }
+
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+}
+model AdmissionForm {
+  id                  String      @id @default(cuid())
+  tenantId            String
+  academicYear        String
+  parentType          String
+  parentName          String?
+  firstName           String
+  lastName            String
+  gender              String
+  studentFullName     String
+  enrollmentClass     String
+  dob                 DateTime?
+  previousSchool      String?
+  previousPrincipal   String?
+  previousPhoneNumber String?
+  houseAddress        String?
+  childAllergies      String?
+  bloodGroup          String?
+  immunizationCertificate Json?
+  birthCertificate    Json?
+  expectations        String?
+  siblingNames        String?
+  numberOfSiblings    Int
+  custodyInfo         String?
+  billPayment         String?
+  pickupPersons       String?
+  passportUpload      Json?
+  senAssessment       String?
+  assessmentReport    Json?
+  fatherFirstName     String?
+  fatherLastName      String?
+  motherFirstName     String?
+  motherLastName      String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  tenant              Tenant      @relation(fields: [tenantId], references: [id])
+}
+// prisma/schema.prisma
+
+model School {
+  id                String   @id @default(cuid())
+  tenantId          String   // Link to Tenant
+  name              String   // Name of the school
+  academicYear      String   // Current academic year
+  country           String   // Country
+  address           String   // Address
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([tenantId])
+  Branch Branch[]
+  Class Class[]
+}
+
+model Branch {
+  id                String   @id @default(cuid())
+  schoolId          String   // Link to School
+  name              String   // Name of the branch
+  address           String   // Address of the branch
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  school            School   @relation(fields: [schoolId], references: [id])
+}
+
+model Class {
+  id                String   @id @default(cuid())
+  schoolId          String   // Link to School
+  name              String   // Name of the class (e.g., Grade 1, Grade 2)
+  capacity          Int      // Capacity of the class
+  studentCount      Int      @default(0) // Current number of students in the class
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  school            School   @relation(fields: [schoolId], references: [id])
+}

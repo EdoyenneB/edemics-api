@@ -1,1 +1,0 @@
-# edemics_api
