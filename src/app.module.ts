@@ -3,6 +3,9 @@ import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { TenantsModule } from './tenant/tenants.module';
+import { AdmissionModule } from './admission/admission.module';
+import { FormConfigurationModule} from './form-configuration/form-configuration.module'
+
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -13,7 +16,9 @@ import { PrismaModule } from './prisma/prisma.module';
     PrismaModule,
     AuthModule,
     OnboardingModule,
+    AdmissionModule,
     TenantsModule,
+    FormConfigurationModule
   ],
 })
 export class AppModule {}

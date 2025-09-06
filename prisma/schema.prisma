@@ -22,7 +22,18 @@ model User {
 
   @@map("users")
 }
+model FormConfiguration {
+  id        String   @id @default(cuid())
+  config    Json     // Store the entire form configuration
+  tenantId  String   @unique
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("form_configurations")
+}
 model School {
   id                  String  @id @default(cuid())
   name                String
@@ -39,6 +50,9 @@ model School {
   branches      Branch[]
   departments   Department[]
   notifications NotificationSettings[]
+  admissionApplications AdmissionApplication[]
+  admissionSettings    AdmissionSettings?  // Changed to single for one-to-one
+  admissionDocuments   AdmissionDocument[]
 
   @@map("schools")
 }
@@ -66,6 +80,7 @@ model Branch {
   sessions    Session[]
   departments Department[] // ADD THIS
   users       User[] // ADD THIS
+  admissionApplications AdmissionApplication[]
 
   @@map("branches")
 }
@@ -133,6 +148,10 @@ model Tenant {
   notifications  NotificationSettings[]
   sections       Section[]
   parentStudents ParentStudent[]
+  admissionApplications AdmissionApplication[]
+  admissionSettings    AdmissionSettings?
+  admissionDocuments   AdmissionDocument[]
+  form_configurations FormConfiguration[]
 
   @@map("tenants")
 }
@@ -268,3 +287,166 @@ model NotificationSettings {
 
   @@map("notification_settings")
 }
+// prisma/schema.prisma (additional models)
+
+model AdmissionApplication {
+  id          String   @id @default(cuid())
+  applicationNumber String   @unique
+  status      String   // Form Submitted, Under Assessment, Admission Letter Sent, Awaiting Payment, Admitted
+  submittedAt DateTime @default(now())
+  studentId   String?  // Add this field
+
+  
+  // Student Information
+  firstName   String
+  lastName    String
+  middleName  String?
+  dateOfBirth DateTime
+  gender      String
+  age         Int?
+  religion    String?
+  nationality String
+  homeLanguage String?
+  disability  String?
+  specialNeeds String?
+  previousSchool String?
+  bloodGroup  String?
+  genotype    String?
+  knownAllergies String?
+  chronicConditions String?
+  immunizationStatus String?
+  
+  // Address Information
+  address     String
+  city        String
+  state       String
+  country     String
+  postalCode  String?
+  lga         String?
+  stateOfOrigin String?
+  
+  // Class Information
+  class       String
+  section     String
+  yearOfAdmission String
+  
+  // Parent/Guardian Information
+  fatherName  String?
+  fatherEmail String?
+  fatherPhone String?
+  fatherOccupation String?
+  fatherEducation String?
+  fatherCompany String?
+  fatherOfficeAddress String?
+  
+  motherName  String?
+  motherEmail String?
+  motherPhone String?
+  motherOccupation String?
+  motherEducation String?
+  motherCompany String?
+  motherOfficeAddress String?
+  
+  guardianName String?
+  guardianEmail String?
+  guardianPhone String?
+  guardianRelationship String?
+  guardianAddress String?
+  guardianOccupation String?
+  
+  emergencyName String?
+  emergencyRelationship String?
+  emergencyPhone String?
+  emergencyPhone2 String?
+  
+  // Documents
+  birthCertificate Boolean @default(false)
+  immunizationRecords Boolean @default(false)
+  previousSchoolReport Boolean @default(false)
+  medicalReport Boolean @default(false)
+  parentIdProof Boolean @default(false)
+  otherDocuments Boolean @default(false)
+  
+  // Additional fields
+  assessmentDate DateTime?
+  assessmentTime String?
+  feeAmount      Float?
+  paymentDeadline DateTime?
+  orientationDate DateTime?
+  
+  tenantId   String
+  branchId   String?
+  schoolId   String?
+  
+  // Relations
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch     Branch?   @relation(fields: [branchId], references: [id])
+  school     School?   @relation(fields: [schoolId], references: [id])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("admission_applications")
+}
+
+model AdmissionSettings {
+  id        String   @id @default(cuid())
+  
+  // Basic Settings
+  customUrl String
+  documentPrefix String @default("ADM")
+  documentSuffix String
+  nextNumber String @default("001")
+  referenceType String @default("prefix") // prefix or suffix
+  
+  // Age Criteria (stored as JSON)
+  ageCriteria Json?
+  
+  // Fee Configuration (stored as JSON)
+  feeConfiguration Json?
+  
+  // Workflow Settings (stored as JSON)
+  workflow Json?
+  
+  // Academic Periods (stored as JSON)
+  admissionPeriods Json?
+  
+  tenantId String @unique
+  schoolId String? @unique  // Added unique constraint for one-to-one
+  
+  // Relations - Now one-to-one since schoolId is unique
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  school School? @relation(fields: [schoolId], references: [id])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("admission_settings")
+}
+
+model AdmissionDocument {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // admission_letter, assessment, payment, etc.
+  content     String?  // HTML content or template
+  attachments Json?    // Store as JSON array instead of String[]
+  
+  tenantId String
+  schoolId String?
+  
+  // Relations
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  school School? @relation(fields: [schoolId], references: [id])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("admission_documents")
+}
+
+// Add these relations to existing models:
+
+
+
+
+
