@@ -12,7 +12,6 @@ async function bootstrap() {
   const corsOptions = isProduction
     ? {
         origin: [
-          'http://localhost:3000',
           'https://edoyenne.com',
           'https://www.edoyenne.com',
         ],
