@@ -163,6 +163,8 @@ model Tenant {
   busStudentAssignments  BusStudentAssignment[]
   busEnrollments         BusEnrollment[]
   agents                 Agent[]
+  pickupDropoffEvents PickupDropoffEvent[]
+
 
 
   @@map("tenants")
@@ -245,10 +247,10 @@ model Student {
   tenant         Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   parentStudents ParentStudent[]
   busAssignments BusStudentAssignment[]
-  busEnrollments BusEnrollment[]
-  agents Agent[] @relation("AgentStudents")
+  
 
-
+  // No explicit relation definition needed
+  
   @@map("students")
 }
 
@@ -392,7 +394,10 @@ model AdmissionApplication {
   tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch     Branch?   @relation(fields: [branchId], references: [id])
   school     School?   @relation(fields: [schoolId], references: [id])
-  
+  busEnrollments BusEnrollment[]
+  agents         Agent[] @relation("AgentAdmissionApplications")
+  pickupDropoffEvents PickupDropoffEvent[]
+
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -470,6 +475,7 @@ model SchoolBus {
   busStops      BusStop[]
   assignedStaff BusStaff[]   @relation("BusAssignedStaff")
   busEnrollments BusEnrollment[]
+  pickupDropoffEvents PickupDropoffEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -489,6 +495,8 @@ model BusRoute {
   buses    SchoolBus[]
   busStops BusStop[]
   busEnrollments BusEnrollment[]
+  pickupDropoffEvents PickupDropoffEvent[]
+
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -513,6 +521,8 @@ model BusStop {
   bus      SchoolBus?              @relation(fields: [busId], references: [id])
   students BusStudentAssignment[]
   busEnrollments BusEnrollment[]
+  pickupDropoffEvents PickupDropoffEvent[]
+
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -594,7 +604,7 @@ model BusEnrollment {
   schoolId    String?
   branchId    String?
 
-  student Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  admissionApplication AdmissionApplication @relation(fields: [studentId], references: [id], onDelete: Cascade)  
   bus     SchoolBus @relation(fields: [busId], references: [id], onDelete: Cascade)
   route   BusRoute  @relation(fields: [routeId], references: [id], onDelete: Cascade)
   stop    BusStop   @relation(fields: [stopId], references: [id], onDelete: Cascade)
@@ -609,6 +619,7 @@ model BusEnrollment {
   @@unique([busId, seatNumber])
   @@map("bus_enrollments")
 }
+
 model Agent {
   id           String   @id @default(cuid())
   name         String
@@ -621,10 +632,47 @@ model Agent {
   tenantId     String
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  students Student[] @relation("AgentStudents")
+  
+  // Add this relation
+  admissionApplications AdmissionApplication[] @relation("AgentAdmissionApplications")
+  
+  pickupDropoffEvents PickupDropoffEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("agents")
 }
+
+
+model PickupDropoffEvent {
+  id            String   @id @default(cuid())
+  studentId     String
+  busId         String
+  routeId       String
+  stopId        String
+  agentId       String
+  type          String   // pickup, dropoff
+  status        String   @default("pending") // completed, pending, missed
+  eventDate     String
+  eventTime     String
+  signatureData String?  // Base64 encoded signature image
+  notes         String?
+  tenantId      String
+
+  bus     SchoolBus @relation(fields: [busId], references: [id], onDelete: Cascade)
+  route   BusRoute  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  stop    BusStop   @relation(fields: [stopId], references: [id], onDelete: Cascade)
+  agent   Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  tenant  Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Add relation to AdmissionApplication
+  admissionApplication AdmissionApplication @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("pickup_dropoff_events")
+}
+
+// Add relation to Student model

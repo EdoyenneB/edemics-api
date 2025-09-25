@@ -31,7 +31,7 @@ export class AdmissionService {
   async getApplication(tenantId: string, id: string) {
     const application = await this.prisma.admissionApplication.findFirst({
       where: { id, tenantId },
-    });
+    }); 
 
     if (!application) {
       throw new NotFoundException('Application not found');
