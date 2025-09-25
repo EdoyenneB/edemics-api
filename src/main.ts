@@ -14,7 +14,6 @@ async function bootstrap() {
         origin: [
           'https://edoyenne.com',
           'https://www.edoyenne.com',
-           'http://localhost:3000',
           
         ],
         credentials: true,
@@ -37,6 +36,6 @@ async function bootstrap() {
     transform: true,
   }));
   
-  await app.listen(configService.get('PORT') || 3001);
+  await app.listen(configService.get('PORT') || 3009);
 }
 bootstrap();
