@@ -39,6 +39,7 @@ export class AdmissionController {
   async updateApplication(@Request() req, @Param('id') id: string, @Body() data: any) {
     return this.admissionService.updateApplication(req.user.tenantId, id, data);
   }
+  
 
   @Put('applications/:id/status')
   async updateApplicationStatus(@Request() req, @Param('id') id: string, @Body() data: { status: string }) {

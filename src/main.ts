@@ -14,6 +14,8 @@ async function bootstrap() {
         origin: [
           'https://edoyenne.com',
           'https://www.edoyenne.com',
+           'http://localhost:3000',
+          
         ],
         credentials: true,
       }

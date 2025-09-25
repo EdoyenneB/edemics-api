@@ -1,4 +1,4 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Get } from '@nestjs/common';
 import { TenantsService } from './tenants.service';
 
 @Controller('tenants')
@@ -20,4 +20,10 @@ async createTenantWithAdmin(@Body() data: {
 }) {
   return this.tenantsService.createTenantWithAdmin(data);
 }
+
+ @Get('users')
+  async getAllUsers() {
+    return this.tenantsService.getAllUsers();
+  }
 }
+

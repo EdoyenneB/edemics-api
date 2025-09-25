@@ -5,6 +5,9 @@ import { OnboardingModule } from './onboarding/onboarding.module';
 import { TenantsModule } from './tenant/tenants.module';
 import { AdmissionModule } from './admission/admission.module';
 import { FormConfigurationModule} from './form-configuration/form-configuration.module'
+import { SchoolBusModule} from './schoolbus/schoolbus.module'
+import { AgentsModule} from './agents/agents.module'
+
 
 import { PrismaModule } from './prisma/prisma.module';
 
@@ -18,7 +21,9 @@ import { PrismaModule } from './prisma/prisma.module';
     OnboardingModule,
     AdmissionModule,
     TenantsModule,
-    FormConfigurationModule
+    FormConfigurationModule,
+    SchoolBusModule,
+    AgentsModule
   ],
 })
 export class AppModule {}
