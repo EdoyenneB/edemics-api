@@ -57,6 +57,7 @@ model School {
   admissionDocuments     AdmissionDocument[]
   schoolBuses           SchoolBus[]
   busEnrollments        BusEnrollment[]
+  clubs                 Club[]
 
   @@map("schools")
 }
@@ -87,6 +88,7 @@ model Branch {
   admissionApplications AdmissionApplication[]
   schoolBuses SchoolBus[]
   busEnrollments        BusEnrollment[]
+  clubs                 Club[]
 
   @@map("branches")
 }
@@ -94,12 +96,12 @@ model Branch {
 model Class {
   id           String   @id @default(cuid())
   name         String
-  department   String?
-  branchId     String
+  department   String?  // Display name for UI
+  branchId     String?
   tenantId     String
-  departmentId String?
+  departmentId String?  // Proper relation to Department
 
-  branch        Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  branch           Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
   tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   departmentRel Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   sections      Section[]
@@ -114,21 +116,31 @@ model Department {
   id                 String       @id @default(cuid())
   name               String
   isAcademic         Boolean      @default(false)
-  type               String
+  type               DepartmentType
   parentDepartmentId String?
   schoolId           String
   tenantId           String
   branchId           String?
 
-  parentDepartment Department?   @relation("DepartmentParent", fields: [parentDepartmentId], references: [id])
-  childDepartments Department[]  @relation("DepartmentParent")
+  // FIXED: Proper self-referencing hierarchy
+  parentDepartment Department?   @relation("DepartmentToDepartment", fields: [parentDepartmentId], references: [id])
+  childDepartments Department[]  @relation("DepartmentToDepartment")
+  
   school           School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   tenant           Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   employees        Employee[]
-  branch           Branch?       @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  classes          Class[]
+  branch           Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  classes          Class[]       // FIXED: Classes linked to departments
 
   @@map("departments")
+}
+
+// FIXED: Added enum for department types
+enum DepartmentType {
+  PARENT
+  DEPARTMENT  
+  SUB
+  CLASS
 }
 
 model Tenant {
@@ -163,9 +175,16 @@ model Tenant {
   busStudentAssignments  BusStudentAssignment[]
   busEnrollments         BusEnrollment[]
   agents                 Agent[]
-  pickupDropoffEvents PickupDropoffEvent[]
-
-
+  pickupDropoffEvents    PickupDropoffEvent[]
+  clubs                  Club[]
+  clubVariants           ClubVariant[]
+  clubSchedules          ClubSchedule[]
+  clubEligibility        ClubEligibility[]
+  clubEnrollments        ClubEnrollment[]
+  clubAttendance         ClubAttendance[]
+  clubChangeRequests     ClubChangeRequest[]
+  clubUnenrollments      ClubUnenrollment[]
+  vendors                Vendor[]
 
   @@map("tenants")
 }
@@ -175,20 +194,22 @@ model Employee {
   name               String
   email              String
   phone              String?
-  employeeId         String?
-  departmentId       String?
-  subDepartment      String?
-  customDepartment   String?
-  customSubDepartment String?
-  classId            String?
-  branchId           String
+  employeeId         String?  @unique
+  departmentId       String?  // FIXED: Proper department relation
+  subDepartment      String?  // For custom sub-departments
+  customDepartment   String?  // For custom department names
+  customSubDepartment String? // For custom sub-department names
+  classId            String?  // FIXED: Only for academic employees
+  branchId           String?
   tenantId           String
 
+  // FIXED: Proper relations
   department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  branch     Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  branch     Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
   tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   class      Class?      @relation(fields: [classId], references: [id], onDelete: SetNull)
   busStaff   BusStaff[]
+  coordinatedClubs Club[] @relation("EmployeeCoordinatedClubs")
 
   @@map("employees")
 }
@@ -196,8 +217,8 @@ model Employee {
 model Section {
   id                 String   @id @default(cuid())
   name               String
-  teacher            String?
-  assistantTeacher   String?
+  teacher            String?  // Teacher name or ID
+  assistantTeacher   String?  // Assistant teacher name or ID
   capacity           String?
   building           String?
   floor              String?
@@ -223,8 +244,8 @@ model Subject {
   assistantTeacher     String?
   customTeacher        String?
   customAssistantTeacher String?
-  classId              String
-  sectionId            String?
+  classId              String   // This should be required
+  sectionId            String?  // This should be optional
   tenantId             String
 
   class   Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
@@ -247,9 +268,9 @@ model Student {
   tenant         Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   parentStudents ParentStudent[]
   busAssignments BusStudentAssignment[]
-  
-
-  // No explicit relation definition needed
+  clubEnrollments     ClubEnrollment[]
+  clubChangeRequests  ClubChangeRequest[]
+  clubUnenrollments   ClubUnenrollment[]
   
   @@map("students")
 }
@@ -398,7 +419,6 @@ model AdmissionApplication {
   agents         Agent[] @relation("AgentAdmissionApplications")
   pickupDropoffEvents PickupDropoffEvent[]
 
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -497,7 +517,6 @@ model BusRoute {
   busEnrollments BusEnrollment[]
   pickupDropoffEvents PickupDropoffEvent[]
 
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -522,7 +541,6 @@ model BusStop {
   students BusStudentAssignment[]
   busEnrollments BusEnrollment[]
   pickupDropoffEvents PickupDropoffEvent[]
-
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -644,7 +662,6 @@ model Agent {
   @@map("agents")
 }
 
-
 model PickupDropoffEvent {
   id            String   @id @default(cuid())
   studentId     String
@@ -675,4 +692,263 @@ model PickupDropoffEvent {
   @@map("pickup_dropoff_events")
 }
 
-// Add relation to Student model
+// Club Management Models
+model Club {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  image           String?
+  baseAmount      Float
+  status          ClubStatus @default(ACTIVE)
+  type            ClubType @default(IN_HOUSE)
+  
+  // Coordinator can be either employee or external staff
+  employeeCoordinatorId String?
+  vendorCoordinatorId   String?
+  externalStaffCoordinatorId String?  // NEW: Support for external staff
+  coordinatorType       CoordinatorType?
+  
+  // Relationships
+  tenantId        String
+  schoolId        String?
+  branchId        String?
+  
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  school          School?  @relation(fields: [schoolId], references: [id])
+  branch          Branch?  @relation(fields: [branchId], references: [id])
+  employeeCoordinator Employee? @relation("EmployeeCoordinatedClubs", fields: [employeeCoordinatorId], references: [id])
+  vendorCoordinator   Vendor?   @relation("VendorCoordinatedClubs", fields: [vendorCoordinatorId], references: [id])
+  externalStaffCoordinator ExternalStaff? @relation("ExternalStaffCoordinatedClubs", fields: [externalStaffCoordinatorId], references: [id])  // NEW
+  
+  // Club details
+  variants        ClubVariant[]
+  schedules       ClubSchedule[]
+  eligibility     ClubEligibility[]
+  enrollments     ClubEnrollment[]
+  attendance      ClubAttendance[]
+  changeRequests  ClubChangeRequest[] @relation("CurrentClubChangeRequests")
+  requestedChangeRequests ClubChangeRequest[] @relation("RequestedClubChangeRequests")
+  unenrollments   ClubUnenrollment[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("clubs")
+}
+
+
+model ClubVariant {
+  id        String   @id @default(cuid())
+  name      String
+  amount    Float
+  clubId    String
+  tenantId  String
+  
+  club      Club     @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  enrollments  ClubEnrollment[]   // 👈 Opposite relation
+
+  
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("club_variants")
+}
+
+model ClubSchedule {
+  id        String   @id @default(cuid())
+  day       String   // Monday, Tuesday, etc.
+  startTime String
+  endTime   String
+  clubId    String
+  tenantId  String
+  
+  club      Club     @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("club_schedules")
+}
+
+model ClubEligibility {
+  id        String   @id @default(cuid())
+  clubId    String
+  term      String   // 1st Term, 2nd Term, 3rd Term
+  className String   // JSS 1, SSS 2, etc.
+  tenantId  String
+  
+  club      Club     @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@unique([clubId, term, className])
+  @@map("club_eligibility")
+}
+
+model ClubEnrollment {
+  id           String         @id @default(cuid())
+  studentId    String
+  clubId       String
+  variantId    String?
+  term         String
+  amount       Float
+  status       EnrollmentStatus @default(ACTIVE)
+  tenantId     String
+  
+  // Relationships
+  student      Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  club         Club           @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  variant      ClubVariant?   @relation(fields: [variantId], references: [id])
+  attendance   ClubAttendance[]
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  enrolledAt   DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([studentId, clubId, term])
+  @@map("club_enrollments")
+}
+
+model ClubAttendance {
+  id           String   @id @default(cuid())
+  enrollmentId String
+  clubId       String
+
+  date         DateTime
+  status       AttendanceStatus
+  tenantId     String
+  
+  enrollment   ClubEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  club      Club  @relation(fields: [clubId], references: [id])  // 👈 Opposite relation
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([enrollmentId, date])
+  @@map("club_attendance")
+}
+
+model ClubChangeRequest {
+  id              String   @id @default(cuid())
+  studentId       String
+  currentClubId   String
+  requestedClubId String
+  reason          String
+  status          ChangeRequestStatus @default(PENDING)
+  tenantId        String
+  
+  student         Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  currentClub     Club    @relation("CurrentClubChangeRequests", fields: [currentClubId], references: [id])
+  requestedClub   Club    @relation("RequestedClubChangeRequests", fields: [requestedClubId], references: [id])
+  tenant          Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  requestedAt DateTime @default(now())
+  processedAt DateTime?
+  
+  @@map("club_change_requests")
+}
+
+model ClubUnenrollment {
+  id        String   @id @default(cuid())
+  studentId String
+  clubId    String
+  reason    String
+  status    UnenrollmentStatus @default(PENDING)
+  tenantId  String
+  
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  club      Club    @relation(fields: [clubId], references: [id])
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  requestedAt DateTime @default(now())
+  processedAt DateTime?
+
+  @@map("club_unenrollments")
+}
+
+model Vendor {
+  id           String   @id @default(cuid())
+  name         String
+  contactPerson String
+  email        String
+  phone        String
+  address      String?
+  status       VendorStatus @default(ACTIVE)
+  
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  coordinatedClubs Club[] @relation("VendorCoordinatedClubs")
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("vendors")
+}
+model ExternalStaff {
+  id              String   @id @default(cuid())
+  name            String
+  email           String
+  phone           String?
+  qualification   String?
+  experience      String?
+  specialization  String?
+  vendorCompany   String?
+  vendorContact   String?
+  tenantId        String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Add relation to clubs
+  coordinatedClubs Club[] @relation("ExternalStaffCoordinatedClubs")
+
+  @@map("external_staff")
+}
+
+// Enums
+enum ClubStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ClubType {
+  IN_HOUSE
+  VENDOR
+}
+
+enum CoordinatorType {
+  EMPLOYEE
+  VENDOR
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum ChangeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum UnenrollmentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum VendorStatus {
+  ACTIVE
+  INACTIVE
+}

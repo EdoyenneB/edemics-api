@@ -7,6 +7,23 @@ import * as bcrypt from 'bcrypt';
 export class OnboardingService {
   constructor(private prisma: PrismaService) {}
 
+   private extractId(value: any): string | null {
+    if (!value) return null;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'object' && value.id) return value.id;
+    if (typeof value === 'object' && value.name) return value.name; // Fallback to name
+    return null;
+  }
+
+  // Helper function to extract name from object or string
+  private extractName(value: any): string | null {
+    if (!value) return null;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'object' && value.name) return value.name;
+    return null;
+  }
+
+
   // School Details
   async getSchoolDetails(tenantId: string) {
     return this.prisma.school.findFirst({
@@ -131,7 +148,7 @@ export class OnboardingService {
 }
 
   // Organogram (Departments)
-  async getDepartments(tenantId: string) {
+ async getDepartments(tenantId: string) {
     return this.prisma.department.findMany({
       where: { tenantId },
       include: {
@@ -140,81 +157,210 @@ export class OnboardingService {
         employees: true,
         branch: true,
         school: true,
+        classes: true, // Include linked classes
       },
     });
   }
+  // onboarding.service.ts - FIXED syncDepartmentsToClasses method
+private async syncDepartmentsToClasses(tenantId: string) {
+  // ONLY get CLASS type departments
+  const classDepartments = await this.prisma.department.findMany({
+    where: { 
+      tenantId,
+      type: 'CLASS' // ONLY CLASS type
+    },
+    include: {
+      branch: true,
+      classes: true
+    }
+  });
 
-// onboarding.service.ts - saveDepartments method
-async saveDepartments(tenantId: string, departments: any[]) {
   const school = await this.prisma.school.findFirst({
     where: { tenantId },
   });
 
-  if (!school) {
-    throw new NotFoundException('School not found for this tenant');
-  }
+  if (!school) return;
 
-  // Delete existing departments
-  await this.prisma.department.deleteMany({
+  // Get existing classes
+  const existingClasses = await this.prisma.class.findMany({
     where: { tenantId },
+    include: { sections: true }
   });
 
-  // Create a map to track department IDs by name
-  const departmentMap = new Map();
-  
-  // First pass: create all departments without parent references
-  for (const dept of departments) {
-    const { parentDepartment, branchId, ...deptData } = dept;
+  // Create or update classes for CLASS departments only
+  for (const dept of classDepartments) {
+    const existingClass = existingClasses.find(cls => cls.name === dept.name);
     
-    // Find branch if branchId is provided
-    let branch = null;
-    if (branchId) {
-      branch = await this.prisma.branch.findFirst({
-        where: { 
-          OR: [
-            { id: branchId },
-            { name: branchId }
-          ],
-          tenantId 
-        },
-      });
-    }
-
-    // Ensure classes are always academic
-    const isAcademic = dept.type === "class" ? true : dept.isAcademic;
-
-    const createdDept = await this.prisma.department.create({
-      data: {
-        ...deptData,
-        isAcademic, // Force classes to be academic
-        schoolId: school.id,
+    if (!existingClass) {
+      // Create new class for this CLASS department
+      const classData: any = {
+        name: dept.name,
+        department: dept.name,
+        departmentId: dept.id,
         tenantId,
-        branchId: branch ? branch.id : null,
-        parentDepartmentId: null, // Set to null initially
-      },
-    });
-    
-    // Store mapping using the original name as key
-    departmentMap.set(dept.name, createdDept.id);
-  }
+        sections: {
+          create: [
+            {
+              name: "A", // Default section
+              capacity: "30",
+              teacher: "",
+              assistantTeacher: "",
+              building: "",
+              floor: "",
+              wing: "",
+              tenantId,
+            }
+          ]
+        }
+      };
 
-  // Second pass: update parent-child relationships
-  for (const dept of departments) {
-    if (dept.parentDepartment && dept.parentDepartment !== "none") {
-      const currentDeptId = departmentMap.get(dept.name);
-      const parentId = departmentMap.get(dept.parentDepartment);
+      // Only add branch if it exists
+      if (dept.branchId) {
+        classData.branchId = dept.branchId;
+      }
+
+      await this.prisma.class.create({
+        data: classData,
+      });
+    } else if (existingClass.branchId !== dept.branchId || existingClass.departmentId !== dept.id) {
+      // Update class if branch or department changed
+      const updateData: any = {};
       
-      if (parentId && currentDeptId) {
-        await this.prisma.department.update({
-          where: { id: currentDeptId },
-          data: { parentDepartmentId: parentId },
+      if (existingClass.branchId !== dept.branchId) {
+        if (dept.branchId) {
+          updateData.branch = { connect: { id: dept.branchId } };
+        } else {
+          updateData.branch = { disconnect: true };
+        }
+      }
+      
+      if (existingClass.departmentId !== dept.id) {
+        updateData.departmentRel = { connect: { id: dept.id } };
+      }
+
+      if (Object.keys(updateData).length > 0) {
+        await this.prisma.class.update({
+          where: { id: existingClass.id },
+          data: updateData,
         });
       }
     }
   }
 
-  return this.getDepartments(tenantId);
+  // Remove classes for deleted CLASS departments
+  const currentDepartmentNames = classDepartments.map(dept => dept.name);
+  const classesToRemove = existingClasses.filter(
+    cls => !currentDepartmentNames.includes(cls.name)
+  );
+
+  for (const cls of classesToRemove) {
+    await this.prisma.class.delete({
+      where: { id: cls.id },
+    });
+  }
 }
+
+
+
+// onboarding.service.ts - saveDepartments method
+// onboarding.service.ts - FIXED saveDepartments method
+ async saveDepartments(tenantId: string, departments: any[]) {
+    const school = await this.prisma.school.findFirst({
+      where: { tenantId },
+    });
+
+    if (!school) {
+      throw new NotFoundException('School not found for this tenant');
+    }
+
+    // Delete existing departments
+    await this.prisma.department.deleteMany({
+      where: { tenantId },
+    });
+
+    const departmentMap = new Map();
+    
+    // First pass: create all departments without parent references
+    for (const dept of departments) {
+      const { parentDepartment, branchId, ...deptData } = dept;
+      
+      // Extract branch ID from object or string
+      const extractedBranchId = this.extractId(branchId);
+
+      // Find branch if branchId is provided and not "none"
+      let branch = null;
+      if (extractedBranchId && extractedBranchId !== "none") {
+        branch = await this.prisma.branch.findFirst({
+          where: { 
+            OR: [
+              { id: extractedBranchId },
+              { name: extractedBranchId }
+            ],
+            tenantId 
+          },
+        });
+      }
+
+      // Convert string type to enum and set academic flag
+      const departmentType = this.mapDepartmentType(dept.type);
+      const isAcademic = departmentType === 'CLASS' ? true : dept.isAcademic;
+
+      const createdDept = await this.prisma.department.create({
+        data: {
+          name: deptData.name,
+          isAcademic,
+          type: departmentType,
+          schoolId: school.id,
+          tenantId,
+          branchId: branch ? branch.id : null,
+          parentDepartmentId: null, // Set to null initially
+        },
+      });
+      
+      // Store mapping using the department name as key
+      departmentMap.set(dept.name, createdDept.id);
+    }
+
+    // Second pass: update parent-child relationships
+    for (const dept of departments) {
+      // Extract parent department name from object or string
+      let parentDeptName: string | null = null;
+      
+      if (dept.parentDepartment && dept.parentDepartment !== "none") {
+        parentDeptName = this.extractName(dept.parentDepartment);
+      }
+
+      if (parentDeptName) {
+        const currentDeptId = departmentMap.get(dept.name);
+        const parentDeptId = departmentMap.get(parentDeptName);
+        
+        if (parentDeptId && currentDeptId) {
+          await this.prisma.department.update({
+            where: { id: currentDeptId },
+            data: { parentDepartmentId: parentDeptId },
+          });
+        }
+      }
+    }
+
+    // ONLY sync CLASS departments to classes
+    await this.syncDepartmentsToClasses(tenantId);
+
+    return this.getDepartments(tenantId);
+  }
+
+
+// Helper to map string types to enum
+private mapDepartmentType(type: string) {
+    switch (type?.toUpperCase()) {
+      case 'PARENT': return 'PARENT';
+      case 'DEPARTMENT': return 'DEPARTMENT';
+      case 'SUB': return 'SUB';
+      case 'CLASS': return 'CLASS';
+      default: return 'DEPARTMENT';
+    }
+  }
+
 
   // Employees
   async getEmployees(tenantId: string) {
@@ -229,91 +375,98 @@ async saveDepartments(tenantId: string, departments: any[]) {
   }
 
 async saveEmployees(tenantId: string, employees: any[]) {
-  // Delete existing employees
-  await this.prisma.employee.deleteMany({
-    where: { tenantId },
-  });
+    // Delete existing employees
+    await this.prisma.employee.deleteMany({
+      where: { tenantId },
+    });
 
-  // Create new employees
-  const createdEmployees = await Promise.all(
-    employees.map(async (employee) => {
-      const { 
-        department, 
-        branch, 
-        class: classData, 
-        employeeId, 
-        customDepartment,
-        customSubDepartment,
-        subDepartment,
-        ...empData 
-      } = employee;
-      
-      // Find related entities
-      let departmentRecord = null;
-      if (department && department !== "other") {
-        departmentRecord = await this.prisma.department.findFirst({
-          where: { 
-            OR: [
-              { id: department },
-              { name: department }
-            ],
-            tenantId 
+    // Create new employees
+    const createdEmployees = await Promise.all(
+      employees.map(async (employee) => {
+        const { 
+          department, 
+          branch, 
+          class: classData, 
+          employeeId, 
+          customDepartment,
+          customSubDepartment,
+          subDepartment,
+          ...empData 
+        } = employee;
+        
+        // Extract IDs from objects
+        const departmentId = this.extractId(department);
+        const branchId = this.extractId(branch);
+        const classId = this.extractId(classData);
+
+        // Find related entities
+        let departmentRecord = null;
+        if (departmentId && departmentId !== "other") {
+          departmentRecord = await this.prisma.department.findFirst({
+            where: { 
+              OR: [
+                { id: departmentId },
+                { name: departmentId }
+              ],
+              tenantId 
+            },
+          });
+        }
+
+        let branchRecord = null;
+        if (branchId && branchId !== "none") {
+          branchRecord = await this.prisma.branch.findFirst({
+            where: { 
+              OR: [
+                { id: branchId },
+                { name: branchId }
+              ],
+              tenantId 
+            },
+          });
+        }
+
+        let classRecord = null;
+        if (classId) {
+          classRecord = await this.prisma.class.findFirst({
+            where: { 
+              OR: [
+                { id: classId },
+                { name: classId }
+              ],
+              tenantId 
+            },
+          });
+        }
+
+        // Use custom department name if provided
+        const finalDepartmentName = departmentId === "other" ? customDepartment : departmentId;
+
+        return this.prisma.employee.create({
+          data: {
+            ...empData,
+            employeeId: employeeId || `EMP${Date.now()}`,
+            departmentId: departmentRecord ? departmentRecord.id : null,
+            branchId: branchRecord ? branchRecord.id : null,
+            classId: classRecord ? classRecord.id : null,
+            subDepartment: subDepartment === "other" ? customSubDepartment : subDepartment,
+            customDepartment: departmentId === "other" ? customDepartment : null,
+            customSubDepartment: subDepartment === "other" ? customSubDepartment : null,
+            tenantId,
+          },
+          include: {
+            department: true,
+            branch: true,
+            class: true,
           },
         });
-      }
+      }),
+    );
 
-      // Use custom department name if provided
-      const finalDepartmentName = department === "other" ? customDepartment : department;
+    return createdEmployees;
+  }
 
-      let branchRecord = null;
-      if (branch) {
-        branchRecord = await this.prisma.branch.findFirst({
-          where: { 
-            OR: [
-              { id: branch },
-              { name: branch }
-            ],
-            tenantId 
-          },
-        });
-      }
 
-      let classRecord = null;
-      if (classData) {
-        classRecord = await this.prisma.class.findFirst({
-          where: { 
-            OR: [
-              { id: classData },
-              { name: classData }
-            ],
-            tenantId 
-          },
-        });
-      }
-
-      return this.prisma.employee.create({
-        data: {
-          ...empData,
-          employeeId: employeeId || empData.id,
-          departmentId: departmentRecord ? departmentRecord.id : null,
-          branchId: branchRecord ? branchRecord.id : null,
-          classId: classRecord ? classRecord.id : null,
-          subDepartment: subDepartment === "other" ? customSubDepartment : subDepartment,
-          customDepartment: department === "other" ? customDepartment : null,
-          customSubDepartment: subDepartment === "other" ? customSubDepartment : null,
-          tenantId,
-        },
-        include: {
-          department: true,
-          branch: true,
-          class: true,
-        },
-      });
-    }),
-  );
-
-  return createdEmployees;
-}
 
 
 
@@ -328,8 +481,75 @@ async saveEmployees(tenantId: string, employees: any[]) {
       },
     });
   }
+  private async syncClassDepartments(tenantId: string) {
+    const classes = await this.prisma.class.findMany({
+      where: { tenantId },
+      include: { departmentRel: true }
+    });
 
+    const school = await this.prisma.school.findFirst({
+      where: { tenantId },
+    });
+
+    if (!school) return;
+
+    // Get existing CLASS departments only
+    const existingClassDepartments = await this.prisma.department.findMany({
+      where: { 
+        tenantId,
+        type: 'CLASS' // ONLY CLASS type
+      }
+    });
+
+    // Create or update CLASS departments for classes
+    for (const cls of classes) {
+      const existingDept = existingClassDepartments.find(dept => dept.name === cls.name);
+      
+      if (!existingDept) {
+        // Create new CLASS department for this class
+        await this.prisma.department.create({
+          data: {
+            name: cls.name,
+            isAcademic: true,
+            type: 'CLASS', // Set as CLASS type
+            schoolId: school.id,
+            tenantId,
+            branchId: cls.branchId,
+          },
+        });
+      } else if (existingDept.branchId !== cls.branchId) {
+        // Update branch if changed
+        await this.prisma.department.update({
+          where: { id: existingDept.id },
+          data: { branchId: cls.branchId },
+        });
+      }
+    }
+
+    // Remove CLASS departments for deleted classes
+    const currentClassNames = classes.map(cls => cls.name);
+    const departmentsToRemove = existingClassDepartments.filter(
+      dept => !currentClassNames.includes(dept.name)
+    );
+
+    for (const dept of departmentsToRemove) {
+      await this.prisma.department.delete({
+        where: { id: dept.id },
+      });
+    }
+  }
+
+
+// onboarding.service.ts - FIXED saveClasses method
 async saveClasses(tenantId: string, classes: any[]) {
+  const school = await this.prisma.school.findFirst({
+    where: { tenantId },
+  });
+
+  if (!school) {
+    throw new NotFoundException('School not found for this tenant');
+  }
+
   // Delete existing classes and sections
   await this.prisma.section.deleteMany({
     where: { tenantId },
@@ -339,46 +559,98 @@ async saveClasses(tenantId: string, classes: any[]) {
     where: { tenantId },
   });
 
-  // Create new classes with sections
+  // Create new classes with sections and department links
   const createdClasses = await Promise.all(
     classes.map(async (cls) => {
       const { sections, department, branch, ...classData } = cls;
       
-      // Find related entities
+      // Extract department ID/name from object or string
+      const departmentIdOrName = this.extractId(department);
+      const departmentName = this.extractName(department);
+
+      // Find or create department for the class
       let departmentRecord = null;
-      if (department) {
+      if (departmentIdOrName) {
+        // First try to find existing department with this name and type CLASS
         departmentRecord = await this.prisma.department.findFirst({
           where: { 
             OR: [
-              { id: department },
-              { name: department }
+              { id: departmentIdOrName },
+              { name: departmentIdOrName }
             ],
-            tenantId 
+            tenantId,
+            type: 'CLASS'
           },
         });
+
+        // If no department found, create one for the class
+        if (!departmentRecord) {
+          departmentRecord = await this.prisma.department.create({
+            data: {
+              name: departmentName || classData.name,
+              isAcademic: true, // Classes are always academic
+              type: 'CLASS',
+              schoolId: school.id,
+              tenantId,
+              branchId: null,
+            },
+          });
+        }
+      } else {
+        // If no department specified, create one with the class name
+        departmentRecord = await this.prisma.department.findFirst({
+          where: { 
+            name: classData.name,
+            tenantId,
+            type: 'CLASS'
+          },
+        });
+
+        if (!departmentRecord) {
+          departmentRecord = await this.prisma.department.create({
+            data: {
+              name: classData.name,
+              isAcademic: true,
+              type: 'CLASS',
+              schoolId: school.id,
+              tenantId,
+              branchId: null,
+            },
+          });
+        }
       }
 
-      let branchRecord = null;
-      if (branch) {
-        branchRecord = await this.prisma.branch.findFirst({
+      // Extract branch ID from object or string
+      const branchId = this.extractId(branch);
+
+      // Prepare class data
+      const classCreateData: any = {
+        ...classData,
+        department: departmentRecord.name,
+        departmentId: departmentRecord.id,
+        tenantId,
+      };
+
+      // Only add branch if it exists and is not "none"
+      if (branchId && branchId !== "none") {
+        const branchRecord = await this.prisma.branch.findFirst({
           where: { 
             OR: [
-              { id: branch },
-              { name: branch }
+              { id: branchId },
+              { name: branchId }
             ],
             tenantId 
           },
         });
+        
+        if (branchRecord) {
+          classCreateData.branchId = branchRecord.id;
+        }
       }
 
+      // Create the class record
       const createdClass = await this.prisma.class.create({
-        data: {
-          ...classData,
-          department: departmentRecord ? departmentRecord.name : department,
-          departmentId: departmentRecord ? departmentRecord.id : null,
-          branchId: branchRecord ? branchRecord.id : null,
-          tenantId,
-        },
+        data: classCreateData,
       });
 
       // Create sections
@@ -387,9 +659,9 @@ async saveClasses(tenantId: string, classes: any[]) {
           sections.map(async (section) => {
             const { teacher, assistantTeacher, customTeacher, customAssistantTeacher, ...sectionData } = section;
             
-            // Use custom teacher names if provided
-            const finalTeacher = teacher === "other" ? customTeacher : teacher;
-            const finalAssistantTeacher = assistantTeacher === "other" ? customAssistantTeacher : assistantTeacher;
+            // Extract teacher IDs from objects if needed
+            const finalTeacher = teacher === "other" ? customTeacher : this.extractId(teacher);
+            const finalAssistantTeacher = assistantTeacher === "other" ? customAssistantTeacher : this.extractId(assistantTeacher);
 
             return this.prisma.section.create({
               data: {
@@ -404,17 +676,38 @@ async saveClasses(tenantId: string, classes: any[]) {
             });
           }),
         );
+      } else {
+        // Create a default section if no sections provided
+        await this.prisma.section.create({
+          data: {
+            name: "A",
+            capacity: "30",
+            teacher: "",
+            assistantTeacher: "",
+            building: "",
+            floor: "",
+            wing: "",
+            classId: createdClass.id,
+            tenantId,
+          },
+        });
       }
 
       return this.prisma.class.findUnique({
         where: { id: createdClass.id },
-        include: { sections: true },
+        include: { 
+          sections: true,
+          departmentRel: true,
+          branch: true 
+        },
       });
     }),
   );
 
   return createdClasses;
 }
+
+
 
   // Subjects
   async getSubjects(tenantId: string) {
@@ -431,6 +724,7 @@ async saveClasses(tenantId: string, classes: any[]) {
 // onboarding.service.ts - saveSubjects method
 // onboarding.service.ts - saveSubjects method
 // onboarding.service.ts - saveSubjects method
+// onboarding.service.ts - FIXED saveSubjects method
 async saveSubjects(tenantId: string, subjects: any[]) {
   // Delete existing subjects
   await this.prisma.subject.deleteMany({
@@ -445,55 +739,48 @@ async saveSubjects(tenantId: string, subjects: any[]) {
         section: sectionName, 
         customTeacher, 
         customAssistantTeacher, 
-        // Remove these properties that shouldn't be passed to Prisma
-        
-        ...cleanSubjectData // Keep only the properties that belong to Subject model
+        ...cleanSubjectData 
       } = subject;
       
-      // Extract class ID or name string from object
+      // Extract class ID or name
       let classIdOrName: string | null = null;
       if (className) {
-        if (typeof className === 'object') {
-          // Extract just the ID or name string from the class object
-          classIdOrName = className.id || className.name;
-        } else {
-          classIdOrName = className;
-        }
+        classIdOrName = typeof className === 'object' ? (className.id || className.name) : className;
       }
       
-      // Extract section ID or name string from object  
+      // Extract section ID or name  
       let sectionIdOrName: string | null = null;
       if (sectionName) {
-        if (typeof sectionName === 'object') {
-          // Extract just the ID or name string from the section object
-          sectionIdOrName = sectionName.id || sectionName.name;
-        } else {
-          sectionIdOrName = sectionName;
-        }
+        sectionIdOrName = typeof sectionName === 'object' ? (sectionName.id || sectionName.name) : sectionName;
       }
 
-      // Find class using just the string ID or name
+      // Find class - THIS IS REQUIRED
       let classRecord = null;
       if (classIdOrName) {
         classRecord = await this.prisma.class.findFirst({
           where: { 
             OR: [
-              { id: classIdOrName },  // ✅ Pass string ID
-              { name: classIdOrName } // ✅ Pass string name
+              { id: classIdOrName },
+              { name: classIdOrName }
             ],
             tenantId 
           },
         });
       }
 
-      // Find section using just the string ID or name
+      // If no class found, we cannot create the subject
+      if (!classRecord) {
+        throw new Error(`Class not found for subject: ${cleanSubjectData.name}. Please select a valid class.`);
+      }
+
+      // Find section (optional)
       let sectionRecord = null;
       if (sectionIdOrName && classRecord) {
         sectionRecord = await this.prisma.section.findFirst({
           where: { 
             OR: [
-              { id: sectionIdOrName },  // ✅ Pass string ID
-              { name: sectionIdOrName } // ✅ Pass string name
+              { id: sectionIdOrName },
+              { name: sectionIdOrName }
             ],
             classId: classRecord.id,
             tenantId 
@@ -501,19 +788,59 @@ async saveSubjects(tenantId: string, subjects: any[]) {
         });
       }
 
-      // Use custom teacher names if provided
-      const finalTeacher = cleanSubjectData.teacher === "other" ? customTeacher : cleanSubjectData.teacher;
-      const finalAssistantTeacher = cleanSubjectData.assistantTeacher === "other" ? customAssistantTeacher : cleanSubjectData.assistantTeacher;
+      // Validate teachers are academic employees if not custom
+      let finalTeacher = cleanSubjectData.teacher;
+      let finalAssistantTeacher = cleanSubjectData.assistantTeacher;
+
+      if (cleanSubjectData.teacher && cleanSubjectData.teacher !== "other") {
+        const teacherEmployee = await this.prisma.employee.findFirst({
+          where: {
+            OR: [
+              { id: cleanSubjectData.teacher },
+              { employeeId: cleanSubjectData.teacher },
+              { name: cleanSubjectData.teacher }
+            ],
+            tenantId,
+            department: {
+              isAcademic: true
+            }
+          },
+        });
+
+        if (!teacherEmployee) {
+          throw new Error(`Teacher ${cleanSubjectData.teacher} is not a valid academic employee`);
+        }
+      }
+
+      if (cleanSubjectData.assistantTeacher && cleanSubjectData.assistantTeacher !== "other") {
+        const assistantEmployee = await this.prisma.employee.findFirst({
+          where: {
+            OR: [
+              { id: cleanSubjectData.assistantTeacher },
+              { employeeId: cleanSubjectData.assistantTeacher },
+              { name: cleanSubjectData.assistantTeacher }
+            ],
+            tenantId,
+            department: {
+              isAcademic: true
+            }
+          },
+        });
+
+        if (!assistantEmployee) {
+          throw new Error(`Assistant teacher ${cleanSubjectData.assistantTeacher} is not a valid academic employee`);
+        }
+      }
 
       return this.prisma.subject.create({
         data: {
           ...cleanSubjectData,
-          teacher: finalTeacher,
-          assistantTeacher: finalAssistantTeacher,
-          customTeacher: cleanSubjectData.teacher === "other" ? customTeacher : null,
-          customAssistantTeacher: cleanSubjectData.assistantTeacher === "other" ? customAssistantTeacher : null,
-          classId: classRecord ? classRecord.id : null,
-          sectionId: sectionRecord ? sectionRecord.id : null,
+          teacher: finalTeacher === "other" ? customTeacher : finalTeacher,
+          assistantTeacher: finalAssistantTeacher === "other" ? customAssistantTeacher : finalAssistantTeacher,
+          customTeacher: finalTeacher === "other" ? customTeacher : null,
+          customAssistantTeacher: finalAssistantTeacher === "other" ? customAssistantTeacher : null,
+          classId: classRecord.id, // REQUIRED - cannot be null
+          sectionId: sectionRecord ? sectionRecord.id : null, // Optional
           tenantId,
         },
         include: {
@@ -576,15 +903,18 @@ async saveSubjects(tenantId: string, subjects: any[]) {
 // src/onboarding/onboarding.service.ts - saveStudentsAndParents method
 // src/onboarding/onboarding.service.ts - saveStudentsAndParents method
 
+// src/onboarding/onboarding.service.ts - FIXED saveStudentsAndParents method
+// src/onboarding/onboarding.service.ts - FIXED saveStudentsAndParents method
 async saveStudentsAndParents(tenantId: string, data: { students: any[]; parents: any[] }) {
   const { students, parents } = data;
   
   try {
-    // Delete existing students and parents
+    // Delete existing parent-student relationships first
     await this.prisma.parentStudent.deleteMany({
       where: { tenantId },
     });
     
+    // Then delete students and parents
     await this.prisma.student.deleteMany({
       where: { tenantId },
     });
@@ -593,11 +923,24 @@ async saveStudentsAndParents(tenantId: string, data: { students: any[]; parents:
       where: { tenantId },
     });
 
-    // First, create all students
+    // First, create all parents (we need parent IDs for student creation)
+    const parentMap = new Map();
+    for (const parent of parents) {
+      const { students: studentIds, ...parentData } = parent;
+      
+      const createdParent = await this.prisma.parent.create({
+        data: {
+          ...parentData,
+          tenantId,
+        },
+      });
+      parentMap.set(parent.id || createdParent.id, createdParent);
+    }
+
+    // Then, create students with proper parentStudents relation
     const studentMap = new Map();
     for (const student of students) {
-      // Clean the student data - extract class name and convert to classId
-      const { parents: _, class: className, section: sectionName, ...studentData } = student;
+      const { parents: parentIds, class: className, section: sectionName, ...studentData } = student;
       
       // Convert class name to classId if provided
       let classIdToUse = studentData.classId || null;
@@ -630,71 +973,80 @@ async saveStudentsAndParents(tenantId: string, data: { students: any[]; parents:
         }
       }
 
+      // Create parentStudents connections for this student
+      const parentStudentConnections = [];
+      if (parentIds && parentIds.length > 0) {
+        for (const parentId of parentIds) {
+          const parent = parentMap.get(parentId);
+          if (parent) {
+            parentStudentConnections.push({
+              parentId: parent.id,
+              tenantId,
+            });
+          }
+        }
+      }
+
+      // Create student WITH proper parentStudents relation
       const createdStudent = await this.prisma.student.create({
         data: {
           ...studentData,
-          classId: classIdToUse, // Use the found classId or null
-          sectionId: sectionIdToUse, // Use the found sectionId or null
+          classId: classIdToUse,
+          sectionId: sectionIdToUse,
           tenantId,
+          parentStudents: {
+            create: parentStudentConnections
+          }
         },
         include: {
-          class: true, // Include the class relation in the response
-          section: true, // Include the section relation in the response
+          class: true,
+          section: true,
+          parentStudents: {
+            include: {
+              parent: true,
+            },
+          },
         },
       });
       studentMap.set(student.id || createdStudent.id, createdStudent);
     }
 
-    // Then, create all parents
-    const parentMap = new Map();
-    for (const parent of parents) {
-      // Clean the parent data
-      const { students: studentIds, ...parentData } = parent;
-      
-      const createdParent = await this.prisma.parent.create({
-        data: {
-          ...parentData,
-          tenantId,
+    // Fetch the final data
+    const finalStudents = await this.prisma.student.findMany({
+      where: { tenantId },
+      include: {
+        class: true,
+        section: true,
+        parentStudents: {
+          include: {
+            parent: true,
+          },
         },
-        include: {
-          parentStudents: {
-            include: {
-              student: {
-                include: {
-                  class: true, // Include class in the response
-                  section: true, // Include section in the response
-                },
+      },
+    });
+
+    const finalParents = await this.prisma.parent.findMany({
+      where: { tenantId },
+      include: {
+        parentStudents: {
+          include: {
+            student: {
+              include: {
+                class: true,
+                section: true,
               },
             },
           },
         },
-      });
-      parentMap.set(parent.id || createdParent.id, createdParent);
-
-      // Create parent-student relationships
-      if (studentIds && studentIds.length > 0) {
-        await Promise.all(
-          studentIds.map(async (studentId: string) => {
-            const student = studentMap.get(studentId);
-            if (student) {
-              await this.prisma.parentStudent.create({
-                data: {
-                  parentId: createdParent.id,
-                  studentId: student.id,
-                  tenantId,
-                },
-              });
-            }
-          })
-        );
-      }
-    }
+      },
+    });
 
     return {
-      students: Array.from(studentMap.values()),
-      parents: Array.from(parentMap.values()),
+      students: finalStudents,
+      parents: finalParents,
     };
   } catch (error) {
+    console.error('Error in saveStudentsAndParents:', error);
     throw error;
   }
 }

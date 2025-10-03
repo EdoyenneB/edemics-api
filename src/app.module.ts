@@ -9,6 +9,8 @@ import { SchoolBusModule} from './schoolbus/schoolbus.module'
 import { AgentsModule} from './agents/agent.module'
 import { StudentModule} from './student/student.module'
 
+import { ExtracurricularModule} from './extracurricular/extracurricular.module'
+
 
 
 import { PrismaModule } from './prisma/prisma.module';
@@ -26,7 +28,8 @@ import { PrismaModule } from './prisma/prisma.module';
     FormConfigurationModule,
     SchoolBusModule,
     AgentsModule,
-    StudentModule
+    StudentModule,
+    ExtracurricularModule
   ],
 })
 export class AppModule {}
